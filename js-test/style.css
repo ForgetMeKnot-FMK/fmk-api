@@ -1,0 +1,37 @@
+.body {
+  margin: 0;
+  width: 100%;
+}
+
+.auth-forms {
+  display: flex;
+  width: 100%;
+}
+
+.form-response-output {
+  white-space: pre-line;
+}
+
+.register-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 50%;
+  align-items: center;
+}
+
+.register-form * {
+  max-width: 20rem;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 50%;
+  align-items: center;
+}
+
+.login-form * {
+  max-width: 20rem;
+}
