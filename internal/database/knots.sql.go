@@ -74,6 +74,25 @@ func (q *Queries) CreateKnot(ctx context.Context, arg CreateKnotParams) (Knot, e
 	return i, err
 }
 
+const deleteKnot = `-- name: DeleteKnot :execrows
+DELETE FROM knots
+WHERE id = $1
+  AND owner_id = $2
+`
+
+type DeleteKnotParams struct {
+	ID      pgtype.UUID
+	OwnerID pgtype.UUID
+}
+
+func (q *Queries) DeleteKnot(ctx context.Context, arg DeleteKnotParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteKnot, arg.ID, arg.OwnerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getKnotByIDAndOwner = `-- name: GetKnotByIDAndOwner :one
 SELECT id, owner_id, encrypted_content, encrypted_content_iv, wrapped_knot_key, wrapped_knot_key_iv, encrypted_title, encrypted_title_iv, key_version, created_at, updated_at
 FROM knots

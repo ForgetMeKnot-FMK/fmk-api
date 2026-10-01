@@ -147,6 +147,26 @@ func (apiCfg *apiConfig) handleKnotGet(c *echo.Context) error {
 	return c.JSON(http.StatusOK, databaseKnotToKnot(knot))
 }
 
+func (apiCfg *apiConfig) handleKnotDelete(c *echo.Context) error {
+	user, err := apiCfg.getUserFromRequest(c)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
+	}
+	var knotID pgtype.UUID
+	if err := knotID.Scan(c.Param("id")); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid knot ID")
+	}
+
+	rows, err := apiCfg.DB.DeleteKnot(c.Request().Context(), database.DeleteKnotParams{ID: knotID, OwnerID: user.ID})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Cannot delete knot")
+	}
+	if rows == 0 {
+		return echo.NewHTTPError(http.StatusNotFound, "Knot not found")
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
 /**
 *************************************************************
 ********************** Knot Attributes **********************

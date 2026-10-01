@@ -47,3 +47,8 @@ SELECT *
 FROM knots
 WHERE id = $1
   AND owner_id = $2;
+--
+-- name: DeleteKnot :execrows
+DELETE FROM knots
+WHERE id = $1
+  AND owner_id = $2;

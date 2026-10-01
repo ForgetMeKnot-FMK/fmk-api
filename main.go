@@ -45,15 +45,19 @@ func main() {
 
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{
-			"http://127.0.0.1:5500",
-			"http://localhost:5500",
-			"http://127.0.0.1:5173",
-			"http://localhost:5173",
+			// "http://127.0.0.1:5500",
+			// "http://localhost:5500",
+			// "http://127.0.0.1:5173",
+			// "http://localhost:5173",
+			"*",
 		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"*"},
 		AllowCredentials: true,
-		MaxAge:           300,
+		UnsafeAllowOriginFunc: func(c *echo.Context, origin string) (string, bool, error) {
+			return origin, true, nil
+		},
+		MaxAge: 300,
 	}))
 
 	e.Use(middleware.RequestLogger())
@@ -68,6 +72,7 @@ func main() {
 
 	e.POST("/api/v1/knot", apiCfg.handleKnotCreation)
 
+	e.DELETE("/api/v1/knot/:id", apiCfg.handleKnotDelete)
 	e.POST("/api/v1/knot/:id/attr", apiCfg.handleKnotAttributesCreation)
 	e.PUT("/api/v1/knot/:id/attr", apiCfg.handleKnotAttributesUpdate)
 	e.PUT("/api/v1/knot/:id", apiCfg.handleKnotUpdate)
