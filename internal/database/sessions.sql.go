@@ -79,7 +79,7 @@ func (q *Queries) DeleteSessionByID(ctx context.Context, id pgtype.UUID) error {
 const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
 
 SELECT id, user_id, token_hash, device_label, ip, user_agent, last_used_at, created_at, expires_at, revoked_at
-FROM sessions
+FROM sessions AS s
 WHERE token_hash = $1
   AND s.revoked_at IS NULL
   AND s.expires_at > now()
@@ -149,4 +149,37 @@ func (q *Queries) GetSessionsByUserID(ctx context.Context, userID pgtype.UUID) (
 		return nil, err
 	}
 	return items, nil
+}
+
+const getUserByTokenHash = `-- name: GetUserByTokenHash :one
+SELECT u.id, u.name, u.username, u.auth_hash, u.kdf_algo, u.kdf_salt, u.kdf_mem_kib, u.kdf_iterations, u.key_version, u.encrypted_master_key, u.encrypted_master_key_iv, u.encrypted_priv_key, u.encrypted_priv_key_iv, u.pub_key_x25519, u.created_at, u.updated_at
+FROM sessions AS s
+  INNER JOIN users AS u ON u.id = s.user_id
+WHERE token_hash = $1
+  AND s.revoked_at IS NULL
+  AND s.expires_at > now()
+`
+
+func (q *Queries) GetUserByTokenHash(ctx context.Context, tokenHash []byte) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByTokenHash, tokenHash)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Username,
+		&i.AuthHash,
+		&i.KdfAlgo,
+		&i.KdfSalt,
+		&i.KdfMemKib,
+		&i.KdfIterations,
+		&i.KeyVersion,
+		&i.EncryptedMasterKey,
+		&i.EncryptedMasterKeyIv,
+		&i.EncryptedPrivKey,
+		&i.EncryptedPrivKeyIv,
+		&i.PubKeyX25519,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

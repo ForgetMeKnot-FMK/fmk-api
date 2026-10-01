@@ -47,3 +47,53 @@ func databaseUserToUser(dbUser database.User) User {
 		UpdatedAt:            dbUser.UpdatedAt,
 	}
 }
+
+type Knot struct {
+	ID                 pgtype.UUID        `json:"id"`
+	OwnerID            pgtype.UUID        `json:"owner_id"`
+	EncryptedContent   []byte             `json:"encrypted_content"`
+	EncryptedContentIv []byte             `json:"encrypted_content_iv"`
+	WrappedKnotKey     []byte             `json:"wrapped_knot_key"`
+	WrappedKnotKeyIv   []byte             `json:"wrapped_knot_key_iv"`
+	EncryptedTitle     []byte             `json:"encrypted_title"`
+	EncryptedTitleIv   []byte             `json:"encrypted_title_iv"`
+	KeyVersion         int32              `json:"key_version"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func databaseKnotToKnot(dbKnot database.Knot) Knot {
+	return Knot{
+		ID:                 dbKnot.ID,
+		OwnerID:            dbKnot.OwnerID,
+		EncryptedContent:   dbKnot.EncryptedContent,
+		EncryptedContentIv: dbKnot.EncryptedContentIv,
+		WrappedKnotKey:     dbKnot.WrappedKnotKey,
+		WrappedKnotKeyIv:   dbKnot.WrappedKnotKeyIv,
+		EncryptedTitle:     dbKnot.EncryptedTitle,
+		EncryptedTitleIv:   dbKnot.EncryptedTitleIv,
+		KeyVersion:         dbKnot.KeyVersion,
+		CreatedAt:          dbKnot.CreatedAt,
+		UpdatedAt:          dbKnot.UpdatedAt,
+	}
+}
+
+type KnotAttribute struct {
+	KnotID     pgtype.UUID        `json:"knot_id"`
+	OwnerID    pgtype.UUID        `json:"owner_id"`
+	Data       []byte             `json:"data"`
+	DataIv     []byte             `json:"data_iv"`
+	KeyVersion int32              `json:"key_version"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+func databaseKnotAttributeToKnotAttribute(dbKnotAttribute database.KnotAttribute) KnotAttribute {
+	return KnotAttribute{
+		KnotID:     dbKnotAttribute.KnotID,
+		OwnerID:    dbKnotAttribute.OwnerID,
+		Data:       dbKnotAttribute.Data,
+		DataIv:     dbKnotAttribute.DataIv,
+		KeyVersion: dbKnotAttribute.KeyVersion,
+		UpdatedAt:  dbKnotAttribute.UpdatedAt,
+	}
+}

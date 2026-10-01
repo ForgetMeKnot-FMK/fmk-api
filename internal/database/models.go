@@ -10,6 +10,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Knot struct {
+	ID                 pgtype.UUID
+	OwnerID            pgtype.UUID
+	EncryptedContent   []byte
+	EncryptedContentIv []byte
+	WrappedKnotKey     []byte
+	WrappedKnotKeyIv   []byte
+	EncryptedTitle     []byte
+	EncryptedTitleIv   []byte
+	KeyVersion         int32
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+}
+
+type KnotAttribute struct {
+	KnotID     pgtype.UUID
+	OwnerID    pgtype.UUID
+	Data       []byte
+	DataIv     []byte
+	KeyVersion int32
+	UpdatedAt  pgtype.Timestamptz
+}
+
 type Session struct {
 	ID          pgtype.UUID
 	UserID      pgtype.UUID
@@ -40,4 +63,12 @@ type User struct {
 	PubKeyX25519         []byte
 	CreatedAt            pgtype.Timestamptz
 	UpdatedAt            pgtype.Timestamptz
+}
+
+type UserAttribute struct {
+	UserID     pgtype.UUID
+	Data       []byte
+	DataIv     []byte
+	KeyVersion int32
+	UpdatedAt  pgtype.Timestamptz
 }

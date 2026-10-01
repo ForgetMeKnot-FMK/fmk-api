@@ -159,7 +159,7 @@ func (apiCfg *apiConfig) handleUserLogin(c *echo.Context) error {
 	}
 
 	if !match {
-		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid credentials")
+		return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized 1: Invalid credentials")
 	}
 
 	// Generate a new session

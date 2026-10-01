@@ -33,7 +33,15 @@ WHERE s.user_id = $1
 
 -- name: GetSessionByTokenHash :one
 SELECT *
-FROM sessions
+FROM sessions AS s
+WHERE token_hash = $1
+  AND s.revoked_at IS NULL
+  AND s.expires_at > now();
+--
+-- name: GetUserByTokenHash :one
+SELECT u.*
+FROM sessions AS s
+  INNER JOIN users AS u ON u.id = s.user_id
 WHERE token_hash = $1
   AND s.revoked_at IS NULL
   AND s.expires_at > now();

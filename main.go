@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
 	"github.com/labstack/echo/v5"
@@ -26,15 +26,20 @@ func main() {
 
 	ctx := context.Background()
 
-	conn, err := pgx.Connect(ctx, os.Getenv("DB_URL"))
+	// A pool lets concurrent requests each use their own connection
+	pool, err := pgxpool.New(ctx, os.Getenv("DB_URL"))
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer conn.Close(ctx)
+	defer pool.Close()
+
+	if err := pool.Ping(ctx); err != nil {
+		log.Fatal(err)
+	}
 
 	log.Println("DB Connected!")
 
-	apiCfg := apiConfig{DB: database.New(conn)}
+	apiCfg := apiConfig{DB: database.New(pool)}
 
 	e := echo.New()
 
@@ -57,11 +62,22 @@ func main() {
 	e.POST("/api/v1/register", apiCfg.handleUserRegistration)
 	e.POST("/api/v1/prelogin", apiCfg.handleUserPreLogin)
 	e.POST("/api/v1/login", apiCfg.handleUserLogin)
+
+	e.GET("/api/v1/knot/attr", apiCfg.handleKnotAttributesList)
+	e.GET("/api/v1/knot/:id/attr", apiCfg.handleKnotAttributesGet)
+
+	e.POST("/api/v1/knot", apiCfg.handleKnotCreation)
+
+	e.POST("/api/v1/knot/:id/attr", apiCfg.handleKnotAttributesCreation)
+	e.PUT("/api/v1/knot/:id/attr", apiCfg.handleKnotAttributesUpdate)
+	e.PUT("/api/v1/knot/:id", apiCfg.handleKnotUpdate)
+	e.GET("/api/v1/knot/:id", apiCfg.handleKnotGet)
+
 	e.GET("/", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"message": "Hello from Echo!"})
 	})
 
 	if err := e.Start(":8000"); err != nil {
-		e.Logger.Error("failed to start the server - error:", err)
+		e.Logger.Error("failed to start the server", "error", err)
 	}
 }
