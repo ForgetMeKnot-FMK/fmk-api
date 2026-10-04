@@ -94,7 +94,7 @@ func (apiCfg *apiConfig) handleUserRegistration(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Cannot create user: %v", err))
 	}
 
-	return c.JSON(http.StatusCreated, user)
+	return c.JSON(http.StatusCreated, databaseUserToUser(user))
 }
 
 func (apiCfg *apiConfig) handleUserPreLogin(c *echo.Context) error {
