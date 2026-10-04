@@ -12,22 +12,25 @@ import (
 )
 
 const createKnotAttributes = `-- name: CreateKnotAttributes :one
-INSERT INTO knot_attributes (knot_id, owner_id, data, data_iv, key_version)
+INSERT INTO knot_attributes (knot_id, owner_id, data, data_iv, key_version, revision)
 SELECT k.id,
   k.owner_id,
   $1::bytea,
   $2::bytea,
-  $3::int
+  $3::int,
+  $4::bigint
 FROM knots k
-WHERE k.id = $4
-  AND k.owner_id = $5
-RETURNING knot_id, owner_id, data, data_iv, key_version, updated_at
+WHERE k.id = $5
+  AND k.owner_id = $6
+  AND k.deleted_revision IS NULL
+RETURNING knot_id, owner_id, data, data_iv, key_version, updated_at, revision
 `
 
 type CreateKnotAttributesParams struct {
 	Data       []byte
 	DataIv     []byte
 	KeyVersion int32
+	Revision   int64
 	KnotID     pgtype.UUID
 	OwnerID    pgtype.UUID
 }
@@ -37,6 +40,7 @@ func (q *Queries) CreateKnotAttributes(ctx context.Context, arg CreateKnotAttrib
 		arg.Data,
 		arg.DataIv,
 		arg.KeyVersion,
+		arg.Revision,
 		arg.KnotID,
 		arg.OwnerID,
 	)
@@ -48,15 +52,98 @@ func (q *Queries) CreateKnotAttributes(ctx context.Context, arg CreateKnotAttrib
 		&i.DataIv,
 		&i.KeyVersion,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
 }
 
+const getChangedKnotAttributes = `-- name: GetChangedKnotAttributes :many
+SELECT a.knot_id, a.owner_id, a.data, a.data_iv, a.key_version, a.updated_at, a.revision
+FROM knot_attributes a
+  INNER JOIN knots k ON k.id = a.knot_id
+WHERE a.owner_id = $1
+  AND a.revision > $2::bigint
+  AND k.deleted_revision IS NULL
+`
+
+type GetChangedKnotAttributesParams struct {
+	OwnerID pgtype.UUID
+	Since   int64
+}
+
+func (q *Queries) GetChangedKnotAttributes(ctx context.Context, arg GetChangedKnotAttributesParams) ([]KnotAttribute, error) {
+	rows, err := q.db.Query(ctx, getChangedKnotAttributes, arg.OwnerID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []KnotAttribute
+	for rows.Next() {
+		var i KnotAttribute
+		if err := rows.Scan(
+			&i.KnotID,
+			&i.OwnerID,
+			&i.Data,
+			&i.DataIv,
+			&i.KeyVersion,
+			&i.UpdatedAt,
+			&i.Revision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getDeletedKnotAttributes = `-- name: GetDeletedKnotAttributes :many
+SELECT a.knot_id, a.owner_id, a.data, a.data_iv, a.key_version, a.updated_at, a.revision
+FROM knot_attributes a
+  INNER JOIN knots k ON k.id = a.knot_id
+WHERE a.owner_id = $1
+  AND k.deleted_revision IS NOT NULL
+ORDER BY k.deleted_revision DESC
+`
+
+// Attributes of deleted knots (the trash), last deleted first
+func (q *Queries) GetDeletedKnotAttributes(ctx context.Context, ownerID pgtype.UUID) ([]KnotAttribute, error) {
+	rows, err := q.db.Query(ctx, getDeletedKnotAttributes, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []KnotAttribute
+	for rows.Next() {
+		var i KnotAttribute
+		if err := rows.Scan(
+			&i.KnotID,
+			&i.OwnerID,
+			&i.Data,
+			&i.DataIv,
+			&i.KeyVersion,
+			&i.UpdatedAt,
+			&i.Revision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getKnotAttributesByKnotID = `-- name: GetKnotAttributesByKnotID :one
-SELECT knot_id, owner_id, data, data_iv, key_version, updated_at
-FROM knot_attributes
-WHERE knot_id = $1
-  AND owner_id = $2
+SELECT a.knot_id, a.owner_id, a.data, a.data_iv, a.key_version, a.updated_at, a.revision
+FROM knot_attributes a
+  INNER JOIN knots k ON k.id = a.knot_id
+WHERE a.knot_id = $1
+  AND a.owner_id = $2
+  AND k.deleted_revision IS NULL
 `
 
 type GetKnotAttributesByKnotIDParams struct {
@@ -74,15 +161,18 @@ func (q *Queries) GetKnotAttributesByKnotID(ctx context.Context, arg GetKnotAttr
 		&i.DataIv,
 		&i.KeyVersion,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const getKnotAttributesByOwnerID = `-- name: GetKnotAttributesByOwnerID :many
-SELECT knot_id, owner_id, data, data_iv, key_version, updated_at
-FROM knot_attributes
-WHERE owner_id = $1
-ORDER BY updated_at DESC
+SELECT a.knot_id, a.owner_id, a.data, a.data_iv, a.key_version, a.updated_at, a.revision
+FROM knot_attributes a
+  INNER JOIN knots k ON k.id = a.knot_id
+WHERE a.owner_id = $1
+  AND k.deleted_revision IS NULL
+ORDER BY a.updated_at DESC
 `
 
 func (q *Queries) GetKnotAttributesByOwnerID(ctx context.Context, ownerID pgtype.UUID) ([]KnotAttribute, error) {
@@ -101,6 +191,7 @@ func (q *Queries) GetKnotAttributesByOwnerID(ctx context.Context, ownerID pgtype
 			&i.DataIv,
 			&i.KeyVersion,
 			&i.UpdatedAt,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -112,27 +203,66 @@ func (q *Queries) GetKnotAttributesByOwnerID(ctx context.Context, ownerID pgtype
 	return items, nil
 }
 
+const stampKnotAttributes = `-- name: StampKnotAttributes :one
+UPDATE knot_attributes
+SET revision = $1::bigint
+WHERE knot_id = $2
+  AND owner_id = $3
+RETURNING knot_id, owner_id, data, data_iv, key_version, updated_at, revision
+`
+
+type StampKnotAttributesParams struct {
+	Revision int64
+	KnotID   pgtype.UUID
+	OwnerID  pgtype.UUID
+}
+
+// Gives a restored knot's attributes the new revision, so GET /sync sends them again
+func (q *Queries) StampKnotAttributes(ctx context.Context, arg StampKnotAttributesParams) (KnotAttribute, error) {
+	row := q.db.QueryRow(ctx, stampKnotAttributes, arg.Revision, arg.KnotID, arg.OwnerID)
+	var i KnotAttribute
+	err := row.Scan(
+		&i.KnotID,
+		&i.OwnerID,
+		&i.Data,
+		&i.DataIv,
+		&i.KeyVersion,
+		&i.UpdatedAt,
+		&i.Revision,
+	)
+	return i, err
+}
+
 const updateKnotAttributes = `-- name: UpdateKnotAttributes :one
 UPDATE knot_attributes
 SET data = $1,
   data_iv = $2,
+  revision = $3,
   updated_at = now()
-WHERE knot_id = $3
-  AND owner_id = $4
-RETURNING knot_id, owner_id, data, data_iv, key_version, updated_at
+WHERE knot_attributes.knot_id = $4
+  AND knot_attributes.owner_id = $5
+  AND EXISTS (
+    SELECT 1
+    FROM knots k
+    WHERE k.id = knot_attributes.knot_id
+      AND k.deleted_revision IS NULL
+  )
+RETURNING knot_id, owner_id, data, data_iv, key_version, updated_at, revision
 `
 
 type UpdateKnotAttributesParams struct {
-	Data    []byte
-	DataIv  []byte
-	KnotID  pgtype.UUID
-	OwnerID pgtype.UUID
+	Data     []byte
+	DataIv   []byte
+	Revision int64
+	KnotID   pgtype.UUID
+	OwnerID  pgtype.UUID
 }
 
 func (q *Queries) UpdateKnotAttributes(ctx context.Context, arg UpdateKnotAttributesParams) (KnotAttribute, error) {
 	row := q.db.QueryRow(ctx, updateKnotAttributes,
 		arg.Data,
 		arg.DataIv,
+		arg.Revision,
 		arg.KnotID,
 		arg.OwnerID,
 	)
@@ -144,6 +274,7 @@ func (q *Queries) UpdateKnotAttributes(ctx context.Context, arg UpdateKnotAttrib
 		&i.DataIv,
 		&i.KeyVersion,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
 }

@@ -7,7 +7,8 @@ INSERT INTO knots(
     wrapped_knot_key_iv,
     encrypted_title,
     encrypted_title_iv,
-    key_version
+    key_version,
+    revision
   )
 VALUES (
     $1,
@@ -17,7 +18,8 @@ VALUES (
     $5,
     $6,
     $7,
-    $8
+    $8,
+    $9
   )
 RETURNING *;
 --
@@ -29,9 +31,11 @@ SET encrypted_content = $3,
   wrapped_knot_key_iv = $6,
   encrypted_title = $7,
   encrypted_title_iv = $8,
-  updated_at = $9
+  updated_at = $9,
+  revision = $10
 WHERE id = $1
   AND owner_id = $2
+  AND deleted_revision IS NULL
 RETURNING *;
 --
 --
@@ -39,6 +43,7 @@ RETURNING *;
 SELECT *
 FROM knots AS k
 WHERE k.owner_id = $1
+  AND k.deleted_revision IS NULL
 ORDER BY k.updated_at DESC
 LIMIT $2 OFFSET $3;
 --
@@ -46,9 +51,39 @@ LIMIT $2 OFFSET $3;
 SELECT *
 FROM knots
 WHERE id = $1
-  AND owner_id = $2;
+  AND owner_id = $2
+  AND deleted_revision IS NULL;
 --
--- name: DeleteKnot :execrows
-DELETE FROM knots
-WHERE id = $1
-  AND owner_id = $2;
+-- Marks the knot as deleted (`deleted_revision`). The row stays, so GET /sync
+-- can report the delete. The other queries here skip deleted knots.
+-- name: SoftDeleteKnot :execrows
+UPDATE knots
+SET deleted_revision = @revision::bigint,
+  revision = @revision::bigint,
+  updated_at = now()
+WHERE id = @id
+  AND owner_id = @owner_id
+  AND deleted_revision IS NULL;
+--
+-- name: GetChangedKnotIDs :many
+SELECT id
+FROM knots
+WHERE owner_id = @owner_id
+  AND revision > @since::bigint
+  AND deleted_revision IS NULL;
+--
+-- name: GetDeletedKnotIDs :many
+SELECT id
+FROM knots
+WHERE owner_id = @owner_id
+  AND deleted_revision > @since::bigint;
+--
+-- Undoes SoftDeleteKnot. The new revision makes GET /sync report the knot again.
+-- name: RestoreKnot :execrows
+UPDATE knots
+SET deleted_revision = NULL,
+  revision = @revision::bigint,
+  updated_at = now()
+WHERE id = @id
+  AND owner_id = @owner_id
+  AND deleted_revision IS NOT NULL;

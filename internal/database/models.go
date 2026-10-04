@@ -22,6 +22,8 @@ type Knot struct {
 	KeyVersion         int32
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
+	Revision           int64
+	DeletedRevision    pgtype.Int8
 }
 
 type KnotAttribute struct {
@@ -31,6 +33,7 @@ type KnotAttribute struct {
 	DataIv     []byte
 	KeyVersion int32
 	UpdatedAt  pgtype.Timestamptz
+	Revision   int64
 }
 
 type Session struct {
@@ -63,6 +66,7 @@ type User struct {
 	PubKeyX25519         []byte
 	CreatedAt            pgtype.Timestamptz
 	UpdatedAt            pgtype.Timestamptz
+	Revision             int64
 }
 
 type UserAttribute struct {
@@ -71,4 +75,5 @@ type UserAttribute struct {
 	DataIv     []byte
 	KeyVersion int32
 	UpdatedAt  pgtype.Timestamptz
+	Revision   int64
 }

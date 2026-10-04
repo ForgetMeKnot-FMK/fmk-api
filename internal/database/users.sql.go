@@ -7,7 +7,26 @@ package database
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const bumpUserRevision = `-- name: BumpUserRevision :one
+UPDATE users
+SET revision = revision + 1
+WHERE id = $1
+RETURNING revision
+`
+
+// Every write calls this first, inside its transaction.
+// It locks the user's row, so the user's writes run one at a time.
+// That way, a higher revision always means a later commit.
+func (q *Queries) BumpUserRevision(ctx context.Context, id pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, bumpUserRevision, id)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
+}
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users(
@@ -40,7 +59,7 @@ VALUES (
     $12,
     $13
   )
-RETURNING id, name, username, auth_hash, kdf_algo, kdf_salt, kdf_mem_kib, kdf_iterations, key_version, encrypted_master_key, encrypted_master_key_iv, encrypted_priv_key, encrypted_priv_key_iv, pub_key_x25519, created_at, updated_at
+RETURNING id, name, username, auth_hash, kdf_algo, kdf_salt, kdf_mem_kib, kdf_iterations, key_version, encrypted_master_key, encrypted_master_key_iv, encrypted_priv_key, encrypted_priv_key_iv, pub_key_x25519, created_at, updated_at, revision
 `
 
 type CreateUserParams struct {
@@ -93,12 +112,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.PubKeyX25519,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const findUserByUsername = `-- name: FindUserByUsername :one
-SELECT id, name, username, auth_hash, kdf_algo, kdf_salt, kdf_mem_kib, kdf_iterations, key_version, encrypted_master_key, encrypted_master_key_iv, encrypted_priv_key, encrypted_priv_key_iv, pub_key_x25519, created_at, updated_at
+SELECT id, name, username, auth_hash, kdf_algo, kdf_salt, kdf_mem_kib, kdf_iterations, key_version, encrypted_master_key, encrypted_master_key_iv, encrypted_priv_key, encrypted_priv_key_iv, pub_key_x25519, created_at, updated_at, revision
 FROM users
 WHERE username = $1
 `
@@ -123,6 +143,20 @@ func (q *Queries) FindUserByUsername(ctx context.Context, username string) (User
 		&i.PubKeyX25519,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
+}
+
+const getUserRevision = `-- name: GetUserRevision :one
+SELECT revision
+FROM users
+WHERE id = $1
+`
+
+func (q *Queries) GetUserRevision(ctx context.Context, id pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, getUserRevision, id)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
 }

@@ -206,7 +206,7 @@ func (apiCfg *apiConfig) handleUserLogin(c *echo.Context) error {
 		Ip:          &ip,
 		DeviceLabel: pgtype.Text{String: ua.Device().String(), Valid: ua.Device().String() != ""},
 		ExpiresAt: pgtype.Timestamptz{
-			Time:  time.Now().UTC().Add(2 * time.Hour),
+			Time:  time.Now().UTC().AddDate(0, 1, 0), // one month
 			Valid: true,
 		},
 		TokenHash: tokenHash[:],

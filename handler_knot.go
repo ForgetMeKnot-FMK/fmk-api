@@ -56,18 +56,21 @@ func (apiCfg *apiConfig) handleKnotCreation(c *echo.Context) error {
 
 	// Todo: Validation (use `https://github.com/go-ozzo/ozzo-validation`)
 
-	knotParams := database.CreateKnotParams{
-		OwnerID:            user.ID,
-		EncryptedContent:   params.EncryptedContent,
-		EncryptedContentIv: params.EncryptedContentIv,
-		WrappedKnotKey:     params.WrappedKnotKey,
-		WrappedKnotKeyIv:   params.WrappedKnotKeyIv,
-		EncryptedTitle:     params.EncryptedTitle,
-		EncryptedTitleIv:   params.EncryptedTitleIv,
-		KeyVersion:         defaultKeyVersion,
-	}
-
-	knot, err := apiCfg.DB.CreateKnot(r.Context(), knotParams)
+	var knot database.Knot
+	_, err = apiCfg.withRevision(r.Context(), user.ID, func(q *database.Queries, rev int64) (err error) {
+		knot, err = q.CreateKnot(r.Context(), database.CreateKnotParams{
+			OwnerID:            user.ID,
+			EncryptedContent:   params.EncryptedContent,
+			EncryptedContentIv: params.EncryptedContentIv,
+			WrappedKnotKey:     params.WrappedKnotKey,
+			WrappedKnotKeyIv:   params.WrappedKnotKeyIv,
+			EncryptedTitle:     params.EncryptedTitle,
+			EncryptedTitleIv:   params.EncryptedTitleIv,
+			KeyVersion:         defaultKeyVersion,
+			Revision:           rev,
+		})
+		return err
+	})
 
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Cannot create knot: %v", err))
@@ -105,19 +108,24 @@ func (apiCfg *apiConfig) handleKnotUpdate(c *echo.Context) error {
 
 	// Todo: Validation (use `https://github.com/go-ozzo/ozzo-validation`)
 
-	knot, err := apiCfg.DB.UpdateKnot(r.Context(), database.UpdateKnotParams{
-		ID:                 knotID,
-		OwnerID:            user.ID,
-		EncryptedContent:   params.EncryptedContent,
-		EncryptedContentIv: params.EncryptedContentIv,
-		WrappedKnotKey:     params.WrappedKnotKey,
-		WrappedKnotKeyIv:   params.WrappedKnotKeyIv,
-		EncryptedTitle:     params.EncryptedTitle,
-		EncryptedTitleIv:   params.EncryptedTitleIv,
-		UpdatedAt:          pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	var knot database.Knot
+	_, err = apiCfg.withRevision(r.Context(), user.ID, func(q *database.Queries, rev int64) (err error) {
+		knot, err = q.UpdateKnot(r.Context(), database.UpdateKnotParams{
+			ID:                 knotID,
+			OwnerID:            user.ID,
+			EncryptedContent:   params.EncryptedContent,
+			EncryptedContentIv: params.EncryptedContentIv,
+			WrappedKnotKey:     params.WrappedKnotKey,
+			WrappedKnotKeyIv:   params.WrappedKnotKeyIv,
+			EncryptedTitle:     params.EncryptedTitle,
+			EncryptedTitleIv:   params.EncryptedTitleIv,
+			UpdatedAt:          pgtype.Timestamptz{Time: time.Now(), Valid: true},
+			Revision:           rev,
+		})
+		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Missing or owned by someone else; don't reveal which
+		// Missing, deleted, or owned by someone else; keep "which" a secret
 		return echo.NewHTTPError(http.StatusNotFound, "Knot not found")
 	}
 	if err != nil {
@@ -157,14 +165,26 @@ func (apiCfg *apiConfig) handleKnotDelete(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid knot ID")
 	}
 
-	rows, err := apiCfg.DB.DeleteKnot(c.Request().Context(), database.DeleteKnotParams{ID: knotID, OwnerID: user.ID})
+	/*
+		Soft delete: the row stays, with `deleted_revision` set, so other
+		devices can learn about it through GET /sync. Its attributes stay too,
+		but are hidden.
+	*/
+	ctx := c.Request().Context()
+	rev, err := apiCfg.withRevision(ctx, user.ID, func(q *database.Queries, rev int64) error {
+		rows, err := q.SoftDeleteKnot(ctx, database.SoftDeleteKnotParams{ID: knotID, OwnerID: user.ID, Revision: rev})
+		if err == nil && rows == 0 {
+			return pgx.ErrNoRows // missing or already deleted: roll back, keep the revision unused
+		}
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return echo.NewHTTPError(http.StatusNotFound, "Knot not found")
+	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Cannot delete knot")
 	}
-	if rows == 0 {
-		return echo.NewHTTPError(http.StatusNotFound, "Knot not found")
-	}
-	return c.NoContent(http.StatusNoContent)
+	return c.JSON(http.StatusOK, map[string]int64{"revision": rev})
 }
 
 /**
@@ -173,15 +193,10 @@ func (apiCfg *apiConfig) handleKnotDelete(c *echo.Context) error {
 *************************************************************
 **/
 
-type knotAttributesParams struct {
-	Data   []byte `json:"data"`
-	DataIv []byte `json:"data_iv"`
-}
-
 // Shared by POST and PUT: auth, knot ID, body, basic validation
-func (apiCfg *apiConfig) parseKnotAttributesRequest(c *echo.Context) (pgtype.UUID, pgtype.UUID, knotAttributesParams, error) {
+func (apiCfg *apiConfig) parseKnotAttributesRequest(c *echo.Context) (pgtype.UUID, pgtype.UUID, attributesParams, error) {
 	var knotID pgtype.UUID
-	params := knotAttributesParams{}
+	params := attributesParams{}
 
 	user, err := apiCfg.getUserFromRequest(c)
 	if err != nil {
@@ -190,13 +205,8 @@ func (apiCfg *apiConfig) parseKnotAttributesRequest(c *echo.Context) (pgtype.UUI
 	if err := knotID.Scan(c.Param("id")); err != nil {
 		return knotID, user.ID, params, echo.NewHTTPError(http.StatusBadRequest, "Invalid knot ID")
 	}
-	if err := json.NewDecoder(c.Request().Body).Decode(&params); err != nil {
-		return knotID, user.ID, params, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("Error parsing JSON: %v", err))
-	}
-	if len(params.Data) == 0 || len(params.DataIv) != 24 {
-		return knotID, user.ID, params, echo.NewHTTPError(http.StatusBadRequest, "data required; data_iv must be 24 bytes")
-	}
-	return knotID, user.ID, params, nil
+	params, err = parseAttributesBody(c)
+	return knotID, user.ID, params, err
 }
 
 func (apiCfg *apiConfig) handleKnotAttributesCreation(c *echo.Context) error {
@@ -205,18 +215,22 @@ func (apiCfg *apiConfig) handleKnotAttributesCreation(c *echo.Context) error {
 		return err
 	}
 
-	attr, err := apiCfg.DB.CreateKnotAttributes(
-		c.Request().Context(),
-		database.CreateKnotAttributesParams{
+	ctx := c.Request().Context()
+	var attr database.KnotAttribute
+	_, err = apiCfg.withRevision(ctx, ownerID, func(q *database.Queries, rev int64) (err error) {
+		attr, err = q.CreateKnotAttributes(ctx, database.CreateKnotAttributesParams{
 			KnotID:     knotID,
 			OwnerID:    ownerID,
 			Data:       params.Data,
 			DataIv:     params.DataIv,
 			KeyVersion: defaultKeyVersion,
+			Revision:   rev,
 		})
+		return err
+	})
 	var pgErr *pgconn.PgError
 	switch {
-	case errors.Is(err, pgx.ErrNoRows): // knot missing or not owned by the user
+	case errors.Is(err, pgx.ErrNoRows): // knot missing, deleted, or not owned by the user
 		return echo.NewHTTPError(http.StatusNotFound, "Knot not found")
 	case errors.As(err, &pgErr) && pgErr.Code == "23505": // unique_violation
 		return echo.NewHTTPError(http.StatusConflict, "Attributes already exist; use PUT")
@@ -236,14 +250,18 @@ func (apiCfg *apiConfig) handleKnotAttributesUpdate(c *echo.Context) error {
 		return err
 	}
 
-	attr, err := apiCfg.DB.UpdateKnotAttributes(
-		c.Request().Context(),
-		database.UpdateKnotAttributesParams{
-			KnotID:  knotID,
-			OwnerID: ownerID,
-			Data:    params.Data,
-			DataIv:  params.DataIv,
+	ctx := c.Request().Context()
+	var attr database.KnotAttribute
+	_, err = apiCfg.withRevision(ctx, ownerID, func(q *database.Queries, rev int64) (err error) {
+		attr, err = q.UpdateKnotAttributes(ctx, database.UpdateKnotAttributesParams{
+			KnotID:   knotID,
+			OwnerID:  ownerID,
+			Data:     params.Data,
+			DataIv:   params.DataIv,
+			Revision: rev,
 		})
+		return err
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return echo.NewHTTPError(http.StatusNotFound, "Knot attributes not found")
 	}

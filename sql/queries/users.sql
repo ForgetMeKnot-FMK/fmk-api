@@ -34,4 +34,17 @@ RETURNING *;
 -- name: FindUserByUsername :one
 SELECT *
 FROM users
-WHERE username = $1;
+WHERE username = $1;--
+-- Every write calls this first, inside its transaction.
+-- It locks the user's row, so the user's writes run one at a time.
+-- That way, a higher revision always means a later commit.
+-- name: BumpUserRevision :one
+UPDATE users
+SET revision = revision + 1
+WHERE id = $1
+RETURNING revision;
+--
+-- name: GetUserRevision :one
+SELECT revision
+FROM users
+WHERE id = $1;

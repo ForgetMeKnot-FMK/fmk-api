@@ -20,7 +20,8 @@ INSERT INTO knots(
     wrapped_knot_key_iv,
     encrypted_title,
     encrypted_title_iv,
-    key_version
+    key_version,
+    revision
   )
 VALUES (
     $1,
@@ -30,9 +31,10 @@ VALUES (
     $5,
     $6,
     $7,
-    $8
+    $8,
+    $9
   )
-RETURNING id, owner_id, encrypted_content, encrypted_content_iv, wrapped_knot_key, wrapped_knot_key_iv, encrypted_title, encrypted_title_iv, key_version, created_at, updated_at
+RETURNING id, owner_id, encrypted_content, encrypted_content_iv, wrapped_knot_key, wrapped_knot_key_iv, encrypted_title, encrypted_title_iv, key_version, created_at, updated_at, revision, deleted_revision
 `
 
 type CreateKnotParams struct {
@@ -44,6 +46,7 @@ type CreateKnotParams struct {
 	EncryptedTitle     []byte
 	EncryptedTitleIv   []byte
 	KeyVersion         int32
+	Revision           int64
 }
 
 func (q *Queries) CreateKnot(ctx context.Context, arg CreateKnotParams) (Knot, error) {
@@ -56,6 +59,7 @@ func (q *Queries) CreateKnot(ctx context.Context, arg CreateKnotParams) (Knot, e
 		arg.EncryptedTitle,
 		arg.EncryptedTitleIv,
 		arg.KeyVersion,
+		arg.Revision,
 	)
 	var i Knot
 	err := row.Scan(
@@ -70,34 +74,83 @@ func (q *Queries) CreateKnot(ctx context.Context, arg CreateKnotParams) (Knot, e
 		&i.KeyVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
+		&i.DeletedRevision,
 	)
 	return i, err
 }
 
-const deleteKnot = `-- name: DeleteKnot :execrows
-DELETE FROM knots
-WHERE id = $1
-  AND owner_id = $2
+const getChangedKnotIDs = `-- name: GetChangedKnotIDs :many
+SELECT id
+FROM knots
+WHERE owner_id = $1
+  AND revision > $2::bigint
+  AND deleted_revision IS NULL
 `
 
-type DeleteKnotParams struct {
-	ID      pgtype.UUID
+type GetChangedKnotIDsParams struct {
 	OwnerID pgtype.UUID
+	Since   int64
 }
 
-func (q *Queries) DeleteKnot(ctx context.Context, arg DeleteKnotParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteKnot, arg.ID, arg.OwnerID)
+func (q *Queries) GetChangedKnotIDs(ctx context.Context, arg GetChangedKnotIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, getChangedKnotIDs, arg.OwnerID, arg.Since)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getDeletedKnotIDs = `-- name: GetDeletedKnotIDs :many
+SELECT id
+FROM knots
+WHERE owner_id = $1
+  AND deleted_revision > $2::bigint
+`
+
+type GetDeletedKnotIDsParams struct {
+	OwnerID pgtype.UUID
+	Since   int64
+}
+
+func (q *Queries) GetDeletedKnotIDs(ctx context.Context, arg GetDeletedKnotIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, getDeletedKnotIDs, arg.OwnerID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getKnotByIDAndOwner = `-- name: GetKnotByIDAndOwner :one
-SELECT id, owner_id, encrypted_content, encrypted_content_iv, wrapped_knot_key, wrapped_knot_key_iv, encrypted_title, encrypted_title_iv, key_version, created_at, updated_at
+SELECT id, owner_id, encrypted_content, encrypted_content_iv, wrapped_knot_key, wrapped_knot_key_iv, encrypted_title, encrypted_title_iv, key_version, created_at, updated_at, revision, deleted_revision
 FROM knots
 WHERE id = $1
   AND owner_id = $2
+  AND deleted_revision IS NULL
 `
 
 type GetKnotByIDAndOwnerParams struct {
@@ -120,14 +173,17 @@ func (q *Queries) GetKnotByIDAndOwner(ctx context.Context, arg GetKnotByIDAndOwn
 		&i.KeyVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
+		&i.DeletedRevision,
 	)
 	return i, err
 }
 
 const getKnotsByOwnerID = `-- name: GetKnotsByOwnerID :many
-SELECT id, owner_id, encrypted_content, encrypted_content_iv, wrapped_knot_key, wrapped_knot_key_iv, encrypted_title, encrypted_title_iv, key_version, created_at, updated_at
+SELECT id, owner_id, encrypted_content, encrypted_content_iv, wrapped_knot_key, wrapped_knot_key_iv, encrypted_title, encrypted_title_iv, key_version, created_at, updated_at, revision, deleted_revision
 FROM knots AS k
 WHERE k.owner_id = $1
+  AND k.deleted_revision IS NULL
 ORDER BY k.updated_at DESC
 LIMIT $2 OFFSET $3
 `
@@ -159,6 +215,8 @@ func (q *Queries) GetKnotsByOwnerID(ctx context.Context, arg GetKnotsByOwnerIDPa
 			&i.KeyVersion,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Revision,
+			&i.DeletedRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -170,6 +228,57 @@ func (q *Queries) GetKnotsByOwnerID(ctx context.Context, arg GetKnotsByOwnerIDPa
 	return items, nil
 }
 
+const restoreKnot = `-- name: RestoreKnot :execrows
+UPDATE knots
+SET deleted_revision = NULL,
+  revision = $1::bigint,
+  updated_at = now()
+WHERE id = $2
+  AND owner_id = $3
+  AND deleted_revision IS NOT NULL
+`
+
+type RestoreKnotParams struct {
+	Revision int64
+	ID       pgtype.UUID
+	OwnerID  pgtype.UUID
+}
+
+// Undoes SoftDeleteKnot. The new revision makes GET /sync report the knot again.
+func (q *Queries) RestoreKnot(ctx context.Context, arg RestoreKnotParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreKnot, arg.Revision, arg.ID, arg.OwnerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const softDeleteKnot = `-- name: SoftDeleteKnot :execrows
+UPDATE knots
+SET deleted_revision = $1::bigint,
+  revision = $1::bigint,
+  updated_at = now()
+WHERE id = $2
+  AND owner_id = $3
+  AND deleted_revision IS NULL
+`
+
+type SoftDeleteKnotParams struct {
+	Revision int64
+	ID       pgtype.UUID
+	OwnerID  pgtype.UUID
+}
+
+// Marks the knot as deleted (`deleted_revision`). The row stays, so GET /sync
+// can report the delete. The other queries here skip deleted knots.
+func (q *Queries) SoftDeleteKnot(ctx context.Context, arg SoftDeleteKnotParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteKnot, arg.Revision, arg.ID, arg.OwnerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateKnot = `-- name: UpdateKnot :one
 UPDATE knots
 SET encrypted_content = $3,
@@ -178,10 +287,12 @@ SET encrypted_content = $3,
   wrapped_knot_key_iv = $6,
   encrypted_title = $7,
   encrypted_title_iv = $8,
-  updated_at = $9
+  updated_at = $9,
+  revision = $10
 WHERE id = $1
   AND owner_id = $2
-RETURNING id, owner_id, encrypted_content, encrypted_content_iv, wrapped_knot_key, wrapped_knot_key_iv, encrypted_title, encrypted_title_iv, key_version, created_at, updated_at
+  AND deleted_revision IS NULL
+RETURNING id, owner_id, encrypted_content, encrypted_content_iv, wrapped_knot_key, wrapped_knot_key_iv, encrypted_title, encrypted_title_iv, key_version, created_at, updated_at, revision, deleted_revision
 `
 
 type UpdateKnotParams struct {
@@ -194,6 +305,7 @@ type UpdateKnotParams struct {
 	EncryptedTitle     []byte
 	EncryptedTitleIv   []byte
 	UpdatedAt          pgtype.Timestamptz
+	Revision           int64
 }
 
 func (q *Queries) UpdateKnot(ctx context.Context, arg UpdateKnotParams) (Knot, error) {
@@ -207,6 +319,7 @@ func (q *Queries) UpdateKnot(ctx context.Context, arg UpdateKnotParams) (Knot, e
 		arg.EncryptedTitle,
 		arg.EncryptedTitleIv,
 		arg.UpdatedAt,
+		arg.Revision,
 	)
 	var i Knot
 	err := row.Scan(
@@ -221,6 +334,8 @@ func (q *Queries) UpdateKnot(ctx context.Context, arg UpdateKnotParams) (Knot, e
 		&i.KeyVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
+		&i.DeletedRevision,
 	)
 	return i, err
 }

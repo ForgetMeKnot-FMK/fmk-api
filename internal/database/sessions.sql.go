@@ -152,7 +152,7 @@ func (q *Queries) GetSessionsByUserID(ctx context.Context, userID pgtype.UUID) (
 }
 
 const getUserByTokenHash = `-- name: GetUserByTokenHash :one
-SELECT u.id, u.name, u.username, u.auth_hash, u.kdf_algo, u.kdf_salt, u.kdf_mem_kib, u.kdf_iterations, u.key_version, u.encrypted_master_key, u.encrypted_master_key_iv, u.encrypted_priv_key, u.encrypted_priv_key_iv, u.pub_key_x25519, u.created_at, u.updated_at
+SELECT u.id, u.name, u.username, u.auth_hash, u.kdf_algo, u.kdf_salt, u.kdf_mem_kib, u.kdf_iterations, u.key_version, u.encrypted_master_key, u.encrypted_master_key_iv, u.encrypted_priv_key, u.encrypted_priv_key_iv, u.pub_key_x25519, u.created_at, u.updated_at, u.revision
 FROM sessions AS s
   INNER JOIN users AS u ON u.id = s.user_id
 WHERE token_hash = $1
@@ -180,6 +180,7 @@ func (q *Queries) GetUserByTokenHash(ctx context.Context, tokenHash []byte) (Use
 		&i.PubKeyX25519,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
 }

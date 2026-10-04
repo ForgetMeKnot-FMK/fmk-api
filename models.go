@@ -58,6 +58,7 @@ type Knot struct {
 	EncryptedTitle     []byte             `json:"encrypted_title"`
 	EncryptedTitleIv   []byte             `json:"encrypted_title_iv"`
 	KeyVersion         int32              `json:"key_version"`
+	Revision           int64              `json:"revision"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
@@ -73,6 +74,7 @@ func databaseKnotToKnot(dbKnot database.Knot) Knot {
 		EncryptedTitle:     dbKnot.EncryptedTitle,
 		EncryptedTitleIv:   dbKnot.EncryptedTitleIv,
 		KeyVersion:         dbKnot.KeyVersion,
+		Revision:           dbKnot.Revision,
 		CreatedAt:          dbKnot.CreatedAt,
 		UpdatedAt:          dbKnot.UpdatedAt,
 	}
@@ -84,6 +86,7 @@ type KnotAttribute struct {
 	Data       []byte             `json:"data"`
 	DataIv     []byte             `json:"data_iv"`
 	KeyVersion int32              `json:"key_version"`
+	Revision   int64              `json:"revision"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
@@ -94,6 +97,27 @@ func databaseKnotAttributeToKnotAttribute(dbKnotAttribute database.KnotAttribute
 		Data:       dbKnotAttribute.Data,
 		DataIv:     dbKnotAttribute.DataIv,
 		KeyVersion: dbKnotAttribute.KeyVersion,
+		Revision:   dbKnotAttribute.Revision,
 		UpdatedAt:  dbKnotAttribute.UpdatedAt,
+	}
+}
+
+type UserAttribute struct {
+	UserID     pgtype.UUID        `json:"user_id"`
+	Data       []byte             `json:"data"`
+	DataIv     []byte             `json:"data_iv"`
+	KeyVersion int32              `json:"key_version"`
+	Revision   int64              `json:"revision"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+func databaseUserAttributeToUserAttribute(dbUserAttribute database.UserAttribute) UserAttribute {
+	return UserAttribute{
+		UserID:     dbUserAttribute.UserID,
+		Data:       dbUserAttribute.Data,
+		DataIv:     dbUserAttribute.DataIv,
+		KeyVersion: dbUserAttribute.KeyVersion,
+		Revision:   dbUserAttribute.Revision,
+		UpdatedAt:  dbUserAttribute.UpdatedAt,
 	}
 }

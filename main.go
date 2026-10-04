@@ -16,7 +16,8 @@ import (
 )
 
 type apiConfig struct {
-	DB *database.Queries
+	DB   *database.Queries
+	Pool *pgxpool.Pool // for transactions (see revision.go)
 }
 
 func main() {
@@ -39,7 +40,7 @@ func main() {
 
 	log.Println("DB Connected!")
 
-	apiCfg := apiConfig{DB: database.New(pool)}
+	apiCfg := apiConfig{DB: database.New(pool), Pool: pool}
 
 	e := echo.New()
 
@@ -68,6 +69,8 @@ func main() {
 	e.POST("/api/v1/login", apiCfg.handleUserLogin)
 
 	e.GET("/api/v1/knot/attr", apiCfg.handleKnotAttributesList)
+	e.GET("/api/v1/knot/trash", apiCfg.handleTrashList)
+	e.POST("/api/v1/knot/:id/restore", apiCfg.handleKnotRestore)
 	e.GET("/api/v1/knot/:id/attr", apiCfg.handleKnotAttributesGet)
 
 	e.POST("/api/v1/knot", apiCfg.handleKnotCreation)
@@ -78,11 +81,21 @@ func main() {
 	e.PUT("/api/v1/knot/:id", apiCfg.handleKnotUpdate)
 	e.GET("/api/v1/knot/:id", apiCfg.handleKnotGet)
 
+	e.GET("/api/v1/user/attr", apiCfg.handleUserAttributesGet)
+	e.POST("/api/v1/user/attr", apiCfg.handleUserAttributesCreation)
+	e.PUT("/api/v1/user/attr", apiCfg.handleUserAttributesUpdate)
+
+	e.GET("/api/v1/sync", apiCfg.handleSync)
+
 	e.GET("/", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"message": "Hello from Echo!"})
 	})
 
-	if err := e.Start(":8000"); err != nil {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8000"
+	}
+	if err := e.Start(":" + port); err != nil {
 		e.Logger.Error("failed to start the server", "error", err)
 	}
 }
