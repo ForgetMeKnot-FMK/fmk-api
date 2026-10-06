@@ -76,6 +76,51 @@ func (q *Queries) DeleteSessionByID(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const getAuthByTokenHash = `-- name: GetAuthByTokenHash :one
+SELECT u.id, u.name, u.username, u.auth_hash, u.kdf_algo, u.kdf_salt, u.kdf_mem_kib, u.kdf_iterations, u.key_version, u.encrypted_master_key, u.encrypted_master_key_iv, u.encrypted_priv_key, u.encrypted_priv_key_iv, u.pub_key_x25519, u.created_at, u.updated_at, u.revision,
+  s.id AS session_id,
+  s.last_used_at AS session_last_used_at
+FROM sessions AS s
+  INNER JOIN users AS u ON u.id = s.user_id
+WHERE s.token_hash = $1
+  AND s.revoked_at IS NULL
+  AND s.expires_at > now()
+`
+
+type GetAuthByTokenHashRow struct {
+	User              User
+	SessionID         pgtype.UUID
+	SessionLastUsedAt pgtype.Timestamptz
+}
+
+// The user and the session a token belongs to (live sessions only)
+func (q *Queries) GetAuthByTokenHash(ctx context.Context, tokenHash []byte) (GetAuthByTokenHashRow, error) {
+	row := q.db.QueryRow(ctx, getAuthByTokenHash, tokenHash)
+	var i GetAuthByTokenHashRow
+	err := row.Scan(
+		&i.User.ID,
+		&i.User.Name,
+		&i.User.Username,
+		&i.User.AuthHash,
+		&i.User.KdfAlgo,
+		&i.User.KdfSalt,
+		&i.User.KdfMemKib,
+		&i.User.KdfIterations,
+		&i.User.KeyVersion,
+		&i.User.EncryptedMasterKey,
+		&i.User.EncryptedMasterKeyIv,
+		&i.User.EncryptedPrivKey,
+		&i.User.EncryptedPrivKeyIv,
+		&i.User.PubKeyX25519,
+		&i.User.CreatedAt,
+		&i.User.UpdatedAt,
+		&i.User.Revision,
+		&i.SessionID,
+		&i.SessionLastUsedAt,
+	)
+	return i, err
+}
+
 const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
 
 SELECT id, user_id, token_hash, device_label, ip, user_agent, last_used_at, created_at, expires_at, revoked_at
@@ -118,6 +163,7 @@ FROM sessions AS s
 WHERE s.user_id = $1
   AND s.revoked_at IS NULL
   AND s.expires_at > now()
+ORDER BY s.last_used_at DESC
 `
 
 func (q *Queries) GetSessionsByUserID(ctx context.Context, userID pgtype.UUID) ([]Session, error) {
@@ -183,4 +229,61 @@ func (q *Queries) GetUserByTokenHash(ctx context.Context, tokenHash []byte) (Use
 		&i.Revision,
 	)
 	return i, err
+}
+
+const revokeOtherSessions = `-- name: RevokeOtherSessions :execrows
+UPDATE sessions
+SET revoked_at = now()
+WHERE user_id = $1
+  AND id <> $2
+  AND revoked_at IS NULL
+  AND expires_at > now()
+`
+
+type RevokeOtherSessionsParams struct {
+	UserID pgtype.UUID
+	ID     pgtype.UUID
+}
+
+// Ends all live sessions of a user but one (the current one)
+func (q *Queries) RevokeOtherSessions(ctx context.Context, arg RevokeOtherSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeOtherSessions, arg.UserID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokeSession = `-- name: RevokeSession :execrows
+UPDATE sessions
+SET revoked_at = now()
+WHERE id = $1
+  AND user_id = $2
+  AND revoked_at IS NULL
+  AND expires_at > now()
+`
+
+type RevokeSessionParams struct {
+	ID     pgtype.UUID
+	UserID pgtype.UUID
+}
+
+// Ends one live session of a user (0 rows: not theirs, or already ended)
+func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeSession, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const touchSession = `-- name: TouchSession :exec
+UPDATE sessions
+SET last_used_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) TouchSession(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, touchSession, id)
+	return err
 }

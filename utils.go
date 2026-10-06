@@ -1,12 +1,13 @@
 package main
 
 import (
-	"context"
 	"crypto/sha256"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ishraq10199/fmk-api/internal/database"
 	"github.com/labstack/echo/v5"
@@ -54,17 +55,40 @@ func getSessionToken(headers *http.Header) ([]byte, error) {
 	return []byte(vals[1]), nil
 }
 
-func (apiCfg *apiConfig) getUserBySessionToken(ctx context.Context, st []byte) (database.User, error) {
-	// token := base64.RawURLEncoding.EncodeToString(st)
-	tokenHash := sha256.Sum256([]byte(st))
-	return apiCfg.DB.GetUserByTokenHash(ctx, tokenHash[:])
+// How often a session's last_used_at is written: not on every request
+const sessionTouchInterval = time.Minute
+
+/*
+getAuthFromRequest finds the user and the session of a request's Bearer token.
+
+Steps:
+ 1. Read the token from the Authorization header.
+ 2. Look up its SHA-256 among live sessions (not revoked, not expired).
+ 3. If the session was last used more than a minute ago, note that it is used
+    now. A failure here doesn't fail the request.
+
+Example: a request with a revoked session's token gets pgx.ErrNoRows.
+*/
+func (apiCfg *apiConfig) getAuthFromRequest(e *echo.Context) (database.GetAuthByTokenHashRow, error) {
+	token, err := getSessionToken(&e.Request().Header)
+	if err != nil {
+		return database.GetAuthByTokenHashRow{}, err
+	}
+	ctx := e.Request().Context()
+	tokenHash := sha256.Sum256(token)
+	auth, err := apiCfg.DB.GetAuthByTokenHash(ctx, tokenHash[:])
+	if err != nil {
+		return auth, err
+	}
+	if time.Since(auth.SessionLastUsedAt.Time) > sessionTouchInterval {
+		if err := apiCfg.DB.TouchSession(ctx, auth.SessionID); err != nil {
+			log.Println("warn: could not update last_used_at:", err)
+		}
+	}
+	return auth, nil
 }
 
-func (apiConfig *apiConfig) getUserFromRequest(e *echo.Context) (database.User, error) {
-	token, err := getSessionToken(&e.Request().Header)
-	var user database.User
-	if err != nil {
-		return user, err
-	}
-	return apiConfig.getUserBySessionToken(e.Request().Context(), token)
+func (apiCfg *apiConfig) getUserFromRequest(e *echo.Context) (database.User, error) {
+	auth, err := apiCfg.getAuthFromRequest(e)
+	return auth.User, err
 }

@@ -94,7 +94,7 @@ func (apiCfg *apiConfig) handleUserRegistration(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Cannot create user: %v", err))
 	}
 
-	return c.JSON(http.StatusCreated, databaseUserToUser(user))
+	return c.JSON(http.StatusCreated, RegisterResult{ID: user.ID})
 }
 
 func (apiCfg *apiConfig) handleUserPreLogin(c *echo.Context) error {
@@ -123,13 +123,15 @@ func (apiCfg *apiConfig) handleUserPreLogin(c *echo.Context) error {
 		)
 	}
 
-	return c.JSON(http.StatusOK, databaseUserToUser(user))
+	// Only the KDF settings: the rest of the row would let anyone test password guesses offline
+	return c.JSON(http.StatusOK, databaseUserToPreloginParams(user))
 }
 
 func (apiCfg *apiConfig) handleUserLogin(c *echo.Context) error {
 	type parameters struct {
 		Username    string `json:"username"`
 		AuthHashRaw []byte `json:"authHash"`
+		Remember    bool   `json:"remember"` // "Remember me": the session lasts a month, not a day
 	}
 
 	r := c.Request()
@@ -206,7 +208,7 @@ func (apiCfg *apiConfig) handleUserLogin(c *echo.Context) error {
 		Ip:          &ip,
 		DeviceLabel: pgtype.Text{String: ua.Device().String(), Valid: ua.Device().String() != ""},
 		ExpiresAt: pgtype.Timestamptz{
-			Time:  time.Now().UTC().AddDate(0, 1, 0), // one month
+			Time:  sessionExpiry(params.Remember),
 			Valid: true,
 		},
 		TokenHash: tokenHash[:],
@@ -251,4 +253,16 @@ func (apiCfg *apiConfig) handleUserLogin(c *echo.Context) error {
 		PubKeyX25519:         user.PubKeyX25519,
 		SealedSessionID:      sealedSessionID,
 	})
+}
+
+/*
+sessionExpiry is when a new session ends: one month with "Remember me", one
+day without (the web client then keeps the session only until the browser
+closes).
+*/
+func sessionExpiry(remember bool) time.Time {
+	if remember {
+		return time.Now().UTC().AddDate(0, 1, 0)
+	}
+	return time.Now().UTC().Add(24 * time.Hour)
 }

@@ -70,7 +70,7 @@ func (apiCfg *apiConfig) handleUserAttributesCreation(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Cannot create user attributes: %v", err))
 	}
 
-	return c.JSON(http.StatusCreated, databaseUserAttributeToUserAttribute(attr))
+	return c.JSON(http.StatusCreated, databaseUserAttributeToWriteResult(attr))
 }
 
 func (apiCfg *apiConfig) handleUserAttributesUpdate(c *echo.Context) error {
@@ -118,5 +118,5 @@ func (apiCfg *apiConfig) handleUserAttributesUpdate(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Cannot update user attributes: %v", err))
 	}
 
-	return c.JSON(http.StatusOK, databaseUserAttributeToUserAttribute(attr))
+	return c.JSON(http.StatusOK, databaseUserAttributeToWriteResult(attr))
 }

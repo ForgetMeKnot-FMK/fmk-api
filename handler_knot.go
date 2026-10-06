@@ -76,7 +76,7 @@ func (apiCfg *apiConfig) handleKnotCreation(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Cannot create knot: %v", err))
 	}
 
-	return c.JSON(http.StatusCreated, databaseKnotToKnot(knot))
+	return c.JSON(http.StatusCreated, databaseKnotToKnotWriteResult(knot))
 }
 
 func (apiCfg *apiConfig) handleKnotUpdate(c *echo.Context) error {
@@ -132,7 +132,7 @@ func (apiCfg *apiConfig) handleKnotUpdate(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Cannot update knot: %v", err))
 	}
 
-	return c.JSON(http.StatusOK, databaseKnotToKnot(knot))
+	return c.JSON(http.StatusOK, databaseKnotToKnotWriteResult(knot))
 }
 
 func (apiCfg *apiConfig) handleKnotGet(c *echo.Context) error {
@@ -241,7 +241,7 @@ func (apiCfg *apiConfig) handleKnotAttributesCreation(c *echo.Context) error {
 		)
 	}
 
-	return c.JSON(http.StatusCreated, databaseKnotAttributeToKnotAttribute(attr))
+	return c.JSON(http.StatusCreated, databaseKnotAttributeToWriteResult(attr))
 }
 
 func (apiCfg *apiConfig) handleKnotAttributesUpdate(c *echo.Context) error {
@@ -269,7 +269,7 @@ func (apiCfg *apiConfig) handleKnotAttributesUpdate(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Cannot update knot attributes: %v", err))
 	}
 
-	return c.JSON(http.StatusOK, databaseKnotAttributeToKnotAttribute(attr))
+	return c.JSON(http.StatusOK, databaseKnotAttributeToWriteResult(attr))
 }
 
 func (apiCfg *apiConfig) handleKnotAttributesGet(c *echo.Context) error {

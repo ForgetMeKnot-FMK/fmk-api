@@ -87,6 +87,12 @@ func main() {
 
 	e.GET("/api/v1/sync", apiCfg.handleSync)
 
+	e.GET("/api/v1/user", apiCfg.handleProfileGet)
+	e.GET("/api/v1/sessions", apiCfg.handleSessionsList)
+	e.DELETE("/api/v1/sessions", apiCfg.handleOtherSessionsRevoke)
+	e.DELETE("/api/v1/sessions/:id", apiCfg.handleSessionRevoke)
+	e.POST("/api/v1/logout", apiCfg.handleLogout)
+
 	e.GET("/", func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"message": "Hello from Echo!"})
 	})
