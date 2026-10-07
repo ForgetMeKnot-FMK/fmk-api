@@ -1,3 +1,5 @@
 fmk-api
 .env
 TODO.md
+# Encrypted blobs (BLOB_DIR default)
+/blobs

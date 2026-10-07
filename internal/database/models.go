@@ -10,6 +10,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Blob struct {
+	ID                pgtype.UUID
+	OwnerID           pgtype.UUID
+	WrappedKey        []byte
+	WrappedKeyIv      []byte
+	Size              int64
+	Sha256            []byte
+	DedupTag          []byte
+	KeyVersion        int32
+	CreatedAt         pgtype.Timestamptz
+	UnreferencedSince pgtype.Timestamptz
+}
+
 type Knot struct {
 	ID                 pgtype.UUID
 	OwnerID            pgtype.UUID
@@ -34,6 +47,11 @@ type KnotAttribute struct {
 	KeyVersion int32
 	UpdatedAt  pgtype.Timestamptz
 	Revision   int64
+}
+
+type KnotBlob struct {
+	KnotID pgtype.UUID
+	BlobID pgtype.UUID
 }
 
 type Session struct {

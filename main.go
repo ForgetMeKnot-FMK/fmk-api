@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
@@ -16,8 +18,19 @@ import (
 )
 
 type apiConfig struct {
-	DB   *database.Queries
-	Pool *pgxpool.Pool // for transactions (see revision.go)
+	DB    *database.Queries
+	Pool  *pgxpool.Pool // for transactions (see revision.go)
+	Blobs *blobStore    // encrypted blobs on disk (see blob_store.go)
+	Quota blobQuota     // per-knot blob quota (see handler_blob.go)
+}
+
+// A whole number from the environment, or `fallback` when unset or not a number
+func envInt(name string, fallback int64) int64 {
+	n, err := strconv.ParseInt(os.Getenv(name), 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return n
 }
 
 func main() {
@@ -40,7 +53,33 @@ func main() {
 
 	log.Println("DB Connected!")
 
-	apiCfg := apiConfig{DB: database.New(pool), Pool: pool}
+	// Encrypted blobs (images): BLOB_DIR, default ./blobs
+	blobDir := os.Getenv("BLOB_DIR")
+	if blobDir == "" {
+		blobDir = "blobs"
+	}
+	blobs, err := newBlobStore(blobDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	apiCfg := apiConfig{DB: database.New(pool), Pool: pool, Blobs: blobs, Quota: blobQuota{
+		// 100 images, and the thumbnail of their cover
+		Count: envInt("KNOT_BLOB_MAX_COUNT", 101),
+		Bytes: envInt("KNOT_BLOB_QUOTA_MB", 25) << 20,
+	}}
+
+	// Unused blobs are deleted after BLOB_UNREFERENCED_DAYS (default 30): checked at start, then daily
+	keepDays, err := strconv.Atoi(os.Getenv("BLOB_UNREFERENCED_DAYS"))
+	if err != nil {
+		keepDays = defaultUnreferencedDays
+	}
+	go func() {
+		for {
+			apiCfg.cleanBlobs(ctx, time.Duration(keepDays)*24*time.Hour)
+			time.Sleep(24 * time.Hour)
+		}
+	}()
 
 	e := echo.New()
 
@@ -86,6 +125,12 @@ func main() {
 	e.PUT("/api/v1/user/attr", apiCfg.handleUserAttributesUpdate)
 
 	e.GET("/api/v1/sync", apiCfg.handleSync)
+
+	e.GET("/api/v1/blob", apiCfg.handleBlobFind)
+	e.GET("/api/v1/blob/quota", apiCfg.handleBlobQuota)
+	e.PUT("/api/v1/blob/:id", apiCfg.handleBlobUpload)
+	e.GET("/api/v1/blob/:id", apiCfg.handleBlobGet)
+	e.GET("/api/v1/blob/:id/key", apiCfg.handleBlobKey)
 
 	e.GET("/api/v1/user", apiCfg.handleProfileGet)
 	e.GET("/api/v1/sessions", apiCfg.handleSessionsList)

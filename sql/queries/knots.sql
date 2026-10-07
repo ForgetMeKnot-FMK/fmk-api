@@ -24,18 +24,24 @@ VALUES (
 RETURNING *;
 --
 -- name: UpdateKnot :one
+-- expected_revision: the revision the client's version is based on. The update only happens when
+-- the knot still has it (NULL: no check, for older clients)
 UPDATE knots
-SET encrypted_content = $3,
-  encrypted_content_iv = $4,
-  wrapped_knot_key = $5,
-  wrapped_knot_key_iv = $6,
-  encrypted_title = $7,
-  encrypted_title_iv = $8,
-  updated_at = $9,
-  revision = $10
-WHERE id = $1
-  AND owner_id = $2
+SET encrypted_content = @encrypted_content,
+  encrypted_content_iv = @encrypted_content_iv,
+  wrapped_knot_key = @wrapped_knot_key,
+  wrapped_knot_key_iv = @wrapped_knot_key_iv,
+  encrypted_title = @encrypted_title,
+  encrypted_title_iv = @encrypted_title_iv,
+  updated_at = @updated_at,
+  revision = @revision
+WHERE id = @id
+  AND owner_id = @owner_id
   AND deleted_revision IS NULL
+  AND (
+    sqlc.narg('expected_revision')::bigint IS NULL
+    OR revision = sqlc.narg('expected_revision')
+  )
 RETURNING *;
 --
 --

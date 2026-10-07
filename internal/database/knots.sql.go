@@ -281,23 +281,25 @@ func (q *Queries) SoftDeleteKnot(ctx context.Context, arg SoftDeleteKnotParams) 
 
 const updateKnot = `-- name: UpdateKnot :one
 UPDATE knots
-SET encrypted_content = $3,
-  encrypted_content_iv = $4,
-  wrapped_knot_key = $5,
-  wrapped_knot_key_iv = $6,
-  encrypted_title = $7,
-  encrypted_title_iv = $8,
-  updated_at = $9,
-  revision = $10
-WHERE id = $1
-  AND owner_id = $2
+SET encrypted_content = $1,
+  encrypted_content_iv = $2,
+  wrapped_knot_key = $3,
+  wrapped_knot_key_iv = $4,
+  encrypted_title = $5,
+  encrypted_title_iv = $6,
+  updated_at = $7,
+  revision = $8
+WHERE id = $9
+  AND owner_id = $10
   AND deleted_revision IS NULL
+  AND (
+    $11::bigint IS NULL
+    OR revision = $11
+  )
 RETURNING id, owner_id, encrypted_content, encrypted_content_iv, wrapped_knot_key, wrapped_knot_key_iv, encrypted_title, encrypted_title_iv, key_version, created_at, updated_at, revision, deleted_revision
 `
 
 type UpdateKnotParams struct {
-	ID                 pgtype.UUID
-	OwnerID            pgtype.UUID
 	EncryptedContent   []byte
 	EncryptedContentIv []byte
 	WrappedKnotKey     []byte
@@ -306,12 +308,15 @@ type UpdateKnotParams struct {
 	EncryptedTitleIv   []byte
 	UpdatedAt          pgtype.Timestamptz
 	Revision           int64
+	ID                 pgtype.UUID
+	OwnerID            pgtype.UUID
+	ExpectedRevision   pgtype.Int8
 }
 
+// expected_revision: the revision the client's version is based on. The update only happens when
+// the knot still has it (NULL: no check, for older clients)
 func (q *Queries) UpdateKnot(ctx context.Context, arg UpdateKnotParams) (Knot, error) {
 	row := q.db.QueryRow(ctx, updateKnot,
-		arg.ID,
-		arg.OwnerID,
 		arg.EncryptedContent,
 		arg.EncryptedContentIv,
 		arg.WrappedKnotKey,
@@ -320,6 +325,9 @@ func (q *Queries) UpdateKnot(ctx context.Context, arg UpdateKnotParams) (Knot, e
 		arg.EncryptedTitleIv,
 		arg.UpdatedAt,
 		arg.Revision,
+		arg.ID,
+		arg.OwnerID,
+		arg.ExpectedRevision,
 	)
 	var i Knot
 	err := row.Scan(

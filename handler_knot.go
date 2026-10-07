@@ -37,6 +37,8 @@ func (apiCfg *apiConfig) handleKnotCreation(c *echo.Context) error {
 		EncryptedTitle     []byte `json:"encrypted_title"`
 		EncryptedTitleIv   []byte `json:"encrypted_title_iv"`
 		// KeyVersion         []byte `json:"key_version"`
+		// The blobs (images) the knot uses; see setKnotBlobs
+		BlobIDs *[]string `json:"blob_ids"`
 	}
 
 	r := c.Request()
@@ -55,6 +57,10 @@ func (apiCfg *apiConfig) handleKnotCreation(c *echo.Context) error {
 	}
 
 	// Todo: Validation (use `https://github.com/go-ozzo/ozzo-validation`)
+	blobIDs, err := parseBlobIDs(params.BlobIDs)
+	if err != nil {
+		return err
+	}
 
 	var knot database.Knot
 	_, err = apiCfg.withRevision(r.Context(), user.ID, func(q *database.Queries, rev int64) (err error) {
@@ -69,9 +75,15 @@ func (apiCfg *apiConfig) handleKnotCreation(c *echo.Context) error {
 			KeyVersion:         defaultKeyVersion,
 			Revision:           rev,
 		})
-		return err
+		if err != nil || blobIDs == nil {
+			return err
+		}
+		return setKnotBlobs(q, r.Context(), apiCfg.Quota, knot.ID, user.ID, blobIDs)
 	})
 
+	if over, err := quotaResponse(c, err); over {
+		return err
+	}
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("Cannot create knot: %v", err))
 	}
@@ -79,6 +91,24 @@ func (apiCfg *apiConfig) handleKnotCreation(c *echo.Context) error {
 	return c.JSON(http.StatusCreated, databaseKnotToKnotWriteResult(knot))
 }
 
+// A PUT based on an outdated revision (another device saved first); carries the current knot
+type staleKnotError struct{ current database.Knot }
+
+func (e *staleKnotError) Error() string { return "stale knot revision" }
+
+/*
+handleKnotUpdate saves a new version of a knot.
+
+Steps:
+ 1. Read the body. `revision` (optional) is the knot's revision the client's
+    version is based on.
+ 2. Update the row, only if it still has that revision (no check without it).
+ 3. No row updated: if the knot exists, another device saved first: answer 409
+    with the current knot. Otherwise 404.
+
+Example: a phone loads k1 at revision 40. A laptop saves k1 (revision 41).
+The phone's PUT with revision 40 gets 409 and the laptop's version.
+*/
 func (apiCfg *apiConfig) handleKnotUpdate(c *echo.Context) error {
 	type parameters struct {
 		EncryptedContent   []byte `json:"encrypted_content"`
@@ -87,6 +117,9 @@ func (apiCfg *apiConfig) handleKnotUpdate(c *echo.Context) error {
 		WrappedKnotKeyIv   []byte `json:"wrapped_knot_key_iv"`
 		EncryptedTitle     []byte `json:"encrypted_title"`
 		EncryptedTitleIv   []byte `json:"encrypted_title_iv"`
+		Revision           *int64 `json:"revision"`
+		// The blobs (images) the knot uses; see setKnotBlobs
+		BlobIDs *[]string `json:"blob_ids"`
 	}
 
 	r := c.Request()
@@ -108,9 +141,19 @@ func (apiCfg *apiConfig) handleKnotUpdate(c *echo.Context) error {
 
 	// Todo: Validation (use `https://github.com/go-ozzo/ozzo-validation`)
 
+	blobIDs, err := parseBlobIDs(params.BlobIDs)
+	if err != nil {
+		return err
+	}
+	expected := pgtype.Int8{}
+	if params.Revision != nil {
+		expected = pgtype.Int8{Int64: *params.Revision, Valid: true}
+	}
+
+	ctx := r.Context()
 	var knot database.Knot
-	_, err = apiCfg.withRevision(r.Context(), user.ID, func(q *database.Queries, rev int64) (err error) {
-		knot, err = q.UpdateKnot(r.Context(), database.UpdateKnotParams{
+	_, err = apiCfg.withRevision(ctx, user.ID, func(q *database.Queries, rev int64) error {
+		updated, err := q.UpdateKnot(ctx, database.UpdateKnotParams{
 			ID:                 knotID,
 			OwnerID:            user.ID,
 			EncryptedContent:   params.EncryptedContent,
@@ -121,9 +164,30 @@ func (apiCfg *apiConfig) handleKnotUpdate(c *echo.Context) error {
 			EncryptedTitleIv:   params.EncryptedTitleIv,
 			UpdatedAt:          pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			Revision:           rev,
+			ExpectedRevision:   expected,
 		})
-		return err
+		if err == nil && blobIDs != nil {
+			knot = updated
+			return setKnotBlobs(q, ctx, apiCfg.Quota, updated.ID, user.ID, blobIDs)
+		}
+		if !errors.Is(err, pgx.ErrNoRows) || !expected.Valid {
+			knot = updated
+			return err
+		}
+		// No row updated: missing (404), or another device saved first (409)
+		current, err := q.GetKnotByIDAndOwner(ctx, database.GetKnotByIDAndOwnerParams{ID: knotID, OwnerID: user.ID})
+		if err != nil {
+			return err // ErrNoRows: missing
+		}
+		return &staleKnotError{current: current}
 	})
+	if over, err := quotaResponse(c, err); over {
+		return err
+	}
+	var stale *staleKnotError
+	if errors.As(err, &stale) {
+		return c.JSON(http.StatusConflict, databaseKnotToKnot(stale.current))
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Missing, deleted, or owned by someone else; keep "which" a secret
 		return echo.NewHTTPError(http.StatusNotFound, "Knot not found")
