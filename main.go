@@ -91,8 +91,9 @@ func main() {
 			// "http://localhost:5173",
 			"*",
 		},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"*"},
+		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders: []string{"Authorization", "Content-Type", "X-Blob-Key", "X-Blob-Key-Iv", "X-Blob-Sha256", "X-Blob-Tag"},
+
 		AllowCredentials: true,
 		UnsafeAllowOriginFunc: func(c *echo.Context, origin string) (string, bool, error) {
 			return origin, true, nil
@@ -133,6 +134,7 @@ func main() {
 	e.GET("/api/v1/blob/:id/key", apiCfg.handleBlobKey)
 
 	e.GET("/api/v1/user", apiCfg.handleProfileGet)
+	e.PUT("/api/v1/user/password", apiCfg.handlePasswordChange)
 	e.GET("/api/v1/sessions", apiCfg.handleSessionsList)
 	e.DELETE("/api/v1/sessions", apiCfg.handleOtherSessionsRevoke)
 	e.DELETE("/api/v1/sessions/:id", apiCfg.handleSessionRevoke)

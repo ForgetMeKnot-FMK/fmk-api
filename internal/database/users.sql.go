@@ -160,3 +160,52 @@ func (q *Queries) GetUserRevision(ctx context.Context, id pgtype.UUID) (int64, e
 	err := row.Scan(&revision)
 	return revision, err
 }
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users
+SET auth_hash = $2,
+  kdf_algo = $3,
+  kdf_salt = $4,
+  kdf_mem_kib = $5,
+  kdf_iterations = $6,
+  encrypted_master_key = $7,
+  encrypted_master_key_iv = $8,
+  encrypted_priv_key = $9,
+  encrypted_priv_key_iv = $10,
+  pub_key_x25519 = $11,
+  updated_at = now()
+WHERE id = $1
+`
+
+type UpdateUserPasswordParams struct {
+	ID                   pgtype.UUID
+	AuthHash             string
+	KdfAlgo              int32
+	KdfSalt              []byte
+	KdfMemKib            int32
+	KdfIterations        int32
+	EncryptedMasterKey   []byte
+	EncryptedMasterKeyIv []byte
+	EncryptedPrivKey     []byte
+	EncryptedPrivKeyIv   []byte
+	PubKeyX25519         []byte
+}
+
+// A new password: the hash that proves it, the KDF settings, and the keys wrapped with the
+// key it derives (the master key itself is the same; the X25519 pair is new)
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.Exec(ctx, updateUserPassword,
+		arg.ID,
+		arg.AuthHash,
+		arg.KdfAlgo,
+		arg.KdfSalt,
+		arg.KdfMemKib,
+		arg.KdfIterations,
+		arg.EncryptedMasterKey,
+		arg.EncryptedMasterKeyIv,
+		arg.EncryptedPrivKey,
+		arg.EncryptedPrivKeyIv,
+		arg.PubKeyX25519,
+	)
+	return err
+}
