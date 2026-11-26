@@ -3,3 +3,10 @@ fmk-api
 TODO.md
 # Encrypted blobs (BLOB_DIR default)
 /blobs
+
+# Docs and per-iteration working notes (kept local)
+/docs
+
+# Markdown files in the project root (kept local), except the README
+/*.md
+!/README.md
